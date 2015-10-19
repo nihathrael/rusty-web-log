@@ -1,0 +1,24 @@
+{{> header }}
+<body>
+	{{> menu }}
+	<br>
+	<div class="container">
+
+		<form action="/post/save" method="post">
+			<div class="form-group">
+				<label for="title">Title</label> <input name="title" type="text"
+					class="form-control" id="title" placeholder="Your Title">
+			</div>
+			<div class="form-group">
+				<label for="content">Content</label>
+				<textarea class="form-control" name="content" id="content"
+					placeholder="Your content" rows="10"></textarea>
+			</div>
+
+			<button type="submit" class="btn btn-default">Save</button>
+		</form>
+		<br>
+	</div>
+	<!-- /.container -->
+
+	{{ > footer }}
