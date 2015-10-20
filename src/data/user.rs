@@ -2,9 +2,9 @@ use rustc_serialize::json::{ToJson, Json};
 use std::collections::BTreeMap;
 
 pub struct User {
-	pub mail: String,
-	pub name: String,
-	pub password: String
+    pub mail: String,
+    pub name: String,
+    pub password: String,
 }
 
 impl ToJson for User {
