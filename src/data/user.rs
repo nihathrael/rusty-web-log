@@ -1,7 +1,10 @@
 use rustc_serialize::json::{ToJson, Json};
 use std::collections::BTreeMap;
+use uuid::Uuid;
 
+#[derive(Debug, Clone)]
 pub struct User {
+	pub id: Uuid,
     pub mail: String,
     pub name: String,
     pub password: String,
