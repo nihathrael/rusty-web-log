@@ -20,7 +20,10 @@ rustc-serialize = "*"
 time = "*"
 chrono = "*"
 uuid = "*"
-sqlite = "*"
+r2d2 = "*"
+r2d2_sqlite = "*"
+rusqlite = "*"
+persistent = "*"
 
 [dependencies.url]
 git = "https://github.com/servo/rust-url"

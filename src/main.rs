@@ -6,26 +6,29 @@ extern crate mount;
 extern crate staticfile;
 extern crate time;
 extern crate url;
-extern crate chrono;
 extern crate uuid;
-extern crate sqlite;
+extern crate rusqlite;
+extern crate r2d2;
+extern crate r2d2_sqlite;
+extern crate persistent;
 
 use handlebars_iron::{Template, HandlebarsEngine};
 use iron::prelude::*;
 use iron::status;
+use iron::typemap::Key;
 use router::Router;
 use rustc_serialize::json::{ToJson, Json};
 use std::collections::BTreeMap;
 use mount::Mount;
 use staticfile::Static;
 use std::path::Path;
-use time::now;
-use chrono::offset::utc::UTC;
+use time::{now};
 use uuid::Uuid;
 use data::{User, Post};
 use util::{ErrorReporter, get_form_data};
-use sqlite::Connection;
-use sqlite::Value;
+use r2d2_sqlite::SqliteConnectionManager;
+use r2d2::Pool;
+use persistent::Read;
 
 #[cfg(feature = "watch")]
 use handlebars_iron::Watchable;
@@ -35,6 +38,9 @@ use std::sync::Arc;
 
 mod data;
 mod util;
+
+pub struct DatabasePool;
+impl Key for DatabasePool { type Value = Pool<SqliteConnectionManager>; }
 
 fn make_data() -> BTreeMap<String, Json> {
     let mut data = BTreeMap::new();
@@ -46,21 +52,6 @@ fn make_data() -> BTreeMap<String, Json> {
         password: "test".to_string(),
     };
     data.insert("user".to_string(), user.to_json());
-
-    let posts = vec![Post {
-                         user_id: user.id,
-                         date: UTC::now(),
-                         content: "This is my first Post. <b>a Test!</b>".to_string(),
-                         title: "First Blogpost".to_string(),
-                     },
-                     Post {
-                         user_id: user.id,
-                         date: UTC::now(),
-                         content: "test".to_string(),
-                         title: "Second Blogpost".to_string(),
-                     }];
-
-    data.insert("posts".to_string(), posts.to_json());
     data
 }
 
@@ -73,9 +64,16 @@ fn main() {
     chain.link_after(template_engine);
     chain.link_after(ErrorReporter);  
     
-//    let connection = sqlite::open(":memory:").unwrap();
-    let connection = sqlite::open("/home/nihathrael/test.db").unwrap();
-    create_tables(&connection);
+    let config = r2d2::Config::builder().
+         error_handler(Box::new(r2d2::LoggingErrorHandler)).
+         build();
+    let manager = SqliteConnectionManager::new("/home/nihathrael/test.db").unwrap();
+
+    let pool = Pool::new(config, manager).unwrap();
+
+    create_tables(&pool);
+	chain.link(Read::<DatabasePool>::both(pool));
+    
     
     Iron::new(chain).http("localhost:3000").unwrap();
 }
@@ -106,9 +104,13 @@ fn setup_routing() -> Mount {
     mount
 }
 
-fn index(_: &mut Request) -> IronResult<Response> {
+fn index(req: &mut Request) -> IronResult<Response> {
     let mut resp = Response::new();
-    let data = make_data();
+    let mut data = make_data();
+    let pool = req.get::<Read<DatabasePool>>().unwrap();
+    let connection = pool.get().unwrap();
+    let posts = Post::all(&connection);
+    data.insert("posts".to_string(), posts.to_json());
     resp.set_mut(Template::new("index", data)).set_mut(status::Ok);
     Ok(resp)
 }
@@ -122,17 +124,18 @@ fn post(_: &mut Request) -> IronResult<Response> {
 
 fn save_post(req: &mut Request) -> IronResult<Response> {
     let form_data = get_form_data(req);
-    let connection = sqlite::open("/home/nihathrael/test.db").unwrap();
-    let mut statement = connection.prepare("
+    let pool = req.get::<Read<DatabasePool>>().unwrap();
+    let connection = pool.get().unwrap();
+    let post = Post {
+    	user_id: 1,
+    	title: form_data.get("title").unwrap().to_string(),
+    	content:  form_data.get("content").unwrap().to_string(),
+    	date: now().to_timespec(),
+    };
+    let statement = connection.execute("
 	    INSERT INTO posts (user_id , title , content , date) VALUES (?, ?, ? ,?);
-	").unwrap();
-    // TODO (TK): Figure out how to find the user from the session (that does not exist yet...)
-    statement.bind(1, 1).unwrap();
-    statement.bind(2, Value::String(form_data.get("title").unwrap().to_string())).unwrap();
-    statement.bind(3, Value::String(form_data.get("content").unwrap().to_string())).unwrap();
-    // TODO (TK): Save date
-    statement.bind(4, 123).unwrap();
-    statement.next().unwrap();
+	", &[&post.user_id, &post.title, &post.content, &post.date]).unwrap();
+	println!("{:?}", statement);
    
     let mut resp = Response::new();
     let data: BTreeMap<String, Json> = BTreeMap::new();
@@ -140,8 +143,9 @@ fn save_post(req: &mut Request) -> IronResult<Response> {
     Ok(resp)
 }
 
-fn create_tables(connection: &Connection) {
-	connection.execute("
+fn create_tables(pool: &Pool<SqliteConnectionManager>)  {
+	let connection = pool.get().unwrap();
+	connection.execute_batch("
 	    CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, password TEXT, mail TEXT);
 	    CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, title TEXT, content TEXT, date INTEGER);
 	").unwrap();
